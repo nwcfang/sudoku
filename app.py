@@ -13,8 +13,8 @@ class BoardException(Exception):
 
 class Cell:
     key = None
-    coordinates = (None, None)
     square_box_number = None
+    coordinates = (None, None)
     possible_values = None
     board = None
 
@@ -30,7 +30,9 @@ class Cell:
         return str(self.key) if self.key else ' '
 
     def __repr__(self):
-        return f"Cell ({self.coordinates[ROW]},{self.coordinates[POSITION]})"
+        key = f' key={self.key}' if self.key else ''
+        pos_values = f' possible={self.possible_values}' if self.possible_values else ''
+        return f"Cell ({self.coordinates[ROW]},{self.coordinates[POSITION]}){key}{pos_values}"
 
     def __check_value_exist(self, cell_array, value):
         for cell in cell_array:
@@ -39,18 +41,14 @@ class Cell:
         return False
 
     def __check_value_exist_in_row(self, value):
-        # row = self.board.board[self.coordinates[ROW] - 1]
         row = self.board.get_row(self.coordinates)
         return self.__check_value_exist(row, value)
 
     def __check_value_exist_in_column(self, value):
-        # cell_position = self.coordinates[POSITION] - 1
-        # column = [row[cell_position] for row in self.board.board]
         column = self.board.get_column(self.coordinates)
         return self.__check_value_exist(column, value)
 
     def __check_value_exist_in_square_box(self, value):
-        # square_box = self.board.square_boxes[str(self.square_box_number)]
         square_box = self.board.get_square_box(self.square_box_number)
         return self.__check_value_exist(square_box, value)
 
@@ -94,12 +92,13 @@ class Board:
             result += '\n'
             result += dashed_string if index_i % self.square_size == 0.0 else ''
 
+        result += f'\nNot resolve cells: {self.not_resolve_cell_count}'
         return str(result)
 
     def print_box_numbers(self):
         dashed_string = ('-' * (self.max_value * 2 + 1) + '\n')
-        result = '\n' + dashed_string
-        result += '\n Box Numbers \n'
+        result = '\n Box Numbers \n'
+        result += '\n' + dashed_string
 
         for index_i, i in enumerate(self.board, 1):
             result += '|'
@@ -124,8 +123,23 @@ class Board:
     def set_key(self, cell_coordinates, key):
         converted_row = cell_coordinates[ROW] - 1
         converted_position = cell_coordinates[POSITION] - 1
-        self.board[converted_row][converted_position].key = key
-        self.not_resolve_cell_count -= 1
+        cell = self.board[converted_row][converted_position]
+
+        if not cell.key:
+            cell.key = int(key)
+            cell.possible_values.clear()
+            self.not_resolve_cell_count -= 1
+
+        self.remove_possible_values_from_row(cell.coordinates, set([int(key)]))
+        self.remove_possible_values_from_column(cell.coordinates, set([int(key)]))
+        self.remove_possible_values_from_box(cell.square_box_number, set([int(key)]))
+
+    def get_cell(self, cell_coordinates):
+        return self.board[cell_coordinates[ROW] - 1][cell_coordinates[POSITION] - 1]
+
+    def remove_possible_values(self, cell_coordinates, values):
+        cell = self.get_cell(cell_coordinates)
+        cell.possible_values.intersection_update(values)
 
     def remove_possible_values_from_row(self, cell_coordinates, values):
         if not isinstance(values, set):
@@ -154,10 +168,34 @@ class Board:
                 func(cell)
 
     def resolve(self):
-        print("Start resolving")
+        attempts = 10
+
         alg = AlgorithmOnlyOnePossibility(self)
-        alg.run()
-        print("Resolving have been complete")
+        algN = AlgorithmNPossibility(self)
+        algPlace = AlgorithmOnlyOnePlace(self)
+        algHiddenPairs = AlgorithmHiddenPairs(self)
+
+        print(self)
+        print(f"Attempts: {attempts}")
+
+        while (attempts > 0) and (self.not_resolve_cell_count > 0):
+            attempts -= 1
+
+            alg.run()
+            algN.run()
+            algPlace.run()
+            algHiddenPairs.run()
+
+            print(f"Not resolve cells: {self.not_resolve_cell_count}")
+            print(f"{attempts} attempts left\n")
+
+        print(self)
+        if attempts <= 0:
+            print("The number of attempts was exceeded.")
+            print("Sorry but solution not found. Try add more algorithms or increase the number of attempts.")
+        else:
+            print("Resolving have been complete")
+            print(f"{attempts} attempts left")
 
     def __load_board(self, fname='input.txt'):
         with open(fname, 'r') as f:
@@ -170,7 +208,7 @@ class Board:
         self.max_value = len(self.board)
 
     def __calc_square_size(self):
-        self.square_size = math.sqrt(self.max_value)
+        self.square_size = int(math.sqrt(self.max_value))
 
     def __set_square_box_for_cells(self):
         for row_number, row in enumerate(self.board, 0):
@@ -204,20 +242,123 @@ class Board:
 
 
 class Algorithm(ABC):
-    board = None
+    has_changes: bool = False
+    board: Board
 
     @abstractmethod
     def __init__(self, board: Board) -> None:
         super().__init__()
         self.board = board
+        self.has_changes = False
 
     @abstractmethod
     def run(self):
         pass
 
 
+class AlgorithmNPossibility(Algorithm):
+    def __init__(self, board: Board) -> None:
+        super().__init__(board)
+
+    def find_same_cells(self, reference: Cell, row: list[Cell]):
+        result = []
+        for cell in row:
+            if id(reference) == id(cell):
+                continue
+            if reference.possible_values == cell.possible_values:
+                result.append(cell)
+        return result
+
+    def __algorithm(self, cell: Cell):
+        if self.board.not_resolve_cell_count <= 0:
+            return
+
+        row = self.board.get_row(cell.coordinates)
+        column = self.board.get_column(cell.coordinates)
+        box = self.board.get_square_box(cell.square_box_number)
+
+        if cell.key:
+            return
+
+        for n in range(2, (self.board.square_size + 1)):
+            if (len(cell.possible_values) == n):
+                row_same_cells = self.find_same_cells(cell, row)
+                column_same_cells = self.find_same_cells(cell, column)
+                box_same_cells = self.find_same_cells(cell, box)
+                self._remove_same_possible_values(cell, row, n, row_same_cells)
+                self._remove_same_possible_values(cell, column, n, column_same_cells)
+                self._remove_same_possible_values(cell, box, n, box_same_cells)
+
+    def _remove_same_possible_values(self, cell, cell_array, n, same_cells):
+        if (len(same_cells) == (n - 1)):
+            for i in cell_array:
+                if i.coordinates == cell.coordinates:
+                    continue
+                same = False
+                for same_cell in same_cells:
+                    if i.coordinates == same_cell.coordinates:
+                        same = True
+                if same:
+                    continue
+                i.possible_values.difference_update(cell.possible_values)
+
+    def run(self):
+        print("Start N possibility algorithm")
+        self.board.for_each_cell(self.__algorithm)
+
+
+class AlgorithmOnlyOnePlace(Algorithm):
+    def __init__(self, board: Board) -> None:
+        super().__init__(board)
+
+    def _find_another_place(self, cell, cells_array, value):
+        for c in cells_array:
+            position = c.coordinates[POSITION]
+            row = c.coordinates[ROW]
+
+            if (position == cell.coordinates[POSITION]) and (row == cell.coordinates[ROW]):
+                continue
+
+            if value in c.possible_values:
+                return True
+        return False
+
+    def __algorithm(self, cell: Cell):
+        if self.board.not_resolve_cell_count <= 0:
+            return
+
+        if (not cell) or cell.key or (not cell.possible_values):
+            return
+
+        row = self.board.get_row(cell.coordinates)
+        column = self.board.get_column(cell.coordinates)
+        box = self.board.get_square_box(cell.square_box_number)
+
+        set_copy = cell.possible_values.copy()
+        for value in set_copy:
+
+            has_another_place_in_row = self._find_another_place(cell, row, value)
+            has_another_place_in_column = self._find_another_place(cell, column, value)
+            has_another_place_in_box = self._find_another_place(cell, box, value)
+
+            for has_place in [has_another_place_in_row, has_another_place_in_column, has_another_place_in_box]:
+                if not has_place:
+                    self.board.set_key(cell.coordinates, value)
+                    self.has_changes = True
+                    return
+
+    def run(self):
+        self.has_changes = True
+        i = 1
+        while self.has_changes:
+            print(f"Start Only One Place algorithm: Iteration {str(i)}")
+            self.has_changes = False
+            if not (self.board.not_resolve_cell_count <= 0):
+                self.board.for_each_cell(self.__algorithm)
+            i += 1
+
+
 class AlgorithmOnlyOnePossibility(Algorithm):
-    has_changes = False
 
     def __init__(self, board: Board) -> None:
         super().__init__(board)
@@ -229,31 +370,96 @@ class AlgorithmOnlyOnePossibility(Algorithm):
         if not cell.key and len(cell.possible_values) == 1:
             self.has_changes = True
             self.board.set_key(cell.coordinates, cell.possible_values.pop())
-            self.board.remove_possible_values_from_row(cell.coordinates, [cell.key])
-            self.board.remove_possible_values_from_column(cell.coordinates, [cell.key])
-            self.board.remove_possible_values_from_box(cell.square_box_number, [cell.key])
 
     def run(self):
         self.has_changes = True
         i = 1
         while self.has_changes:
-            print(f"\nIteration {str(i)}")
-            print("Start only one possibility algorithm")
-
+            print(f"Start Only One Possibility algorithm: Iteration {str(i)}")
             self.has_changes = False
             self.board.for_each_cell(self.__algorithm)
-
-            print(self.board)
-            print(f"Not resolve cells: {board.not_resolve_cell_count}")
-
             i += 1
+
+
+class AlgorithmHiddenPairs(Algorithm):
+
+    def __init__(self, board: Board) -> None:
+        super().__init__(board)
+
+    def __find_paired_cell(self, reference, cell_array):
+        def __check_only_two_positions(value, cell_array):
+            counter = 0
+            for cell in cell_array:
+                if value in cell.possible_values:
+                    counter += 1
+            return False if counter != 2 else True
+
+        pairs = []
+        reference_values = list(reference.possible_values)
+
+        for i, value in enumerate(reference_values):
+            if not __check_only_two_positions(value, cell_array):
+                continue
+
+            for j in range(i + 1, len(reference_values)):
+                if not __check_only_two_positions(reference_values[j], cell_array):
+                    continue
+
+                pair_candidate = {value, reference_values[j]}
+                pair_counter = 0
+                tmp_pair = {
+                    'cell': reference,
+                    'pair_values': pair_candidate
+                }
+                for cell in cell_array:
+                    if cell.key:
+                        continue
+                    if (cell.coordinates != reference.coordinates) and pair_candidate.issubset(cell.possible_values):
+                        pair_counter += 1
+
+                if pair_counter != 1:
+                    continue
+                pairs.append(tmp_pair)
+
+        if pairs:
+            if len(pairs) > 1:
+                print(len(pairs))
+            return pairs
+        return None
+
+    def __algorithm(self, cell: Cell):
+        if self.board.not_resolve_cell_count <= 0:
+            return
+
+        if self.board is None and not isinstance(self.board, Board):
+            return
+
+        row = self.board.get_row(cell.coordinates)
+        column = self.board.get_column(cell.coordinates)
+        box = self.board.get_square_box(cell.square_box_number)
+
+        if cell.key:
+            return
+
+        pairs_row = self.__find_paired_cell(cell, row)
+        pairs_column = self.__find_paired_cell(cell, column)
+        pairs_box = self.__find_paired_cell(cell, box)
+
+        for pair in [pairs_row, pairs_column, pairs_box]:
+            if not pair:
+                continue
+            for d in pair:
+                self.board.remove_possible_values(d['cell'].coordinates, d['pair_values'])
+
+    def run(self):
+        print("Start hidden pairs algorithm")
+        self.board.for_each_cell(self.__algorithm)
 
 
 if __name__ == "__main__":
     print("Inserting sudoku from the file...")
-    filename = input("Please enter a filename: ") or 'easy_level.txt'
+    filename = input("Please enter a filename: ") or 'hard_level.txt'
 
     board = Board(filename)
-    print(board)
-    board.print_box_numbers()
+    print(f"Start resolving for {filename}")
     board.resolve()
