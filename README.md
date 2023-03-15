@@ -27,7 +27,7 @@ Each block must contain all set of values without exceptions.
 
 If there are several cells with the same set of possible values in block, then there cannot be these values in the other cells of the block. Program exclude unnecessary possible values from the cell block.
 
-### Hidden pairs of possible values
+### Algorithm 4: Hidden pairs of possible values
 
 The algorithm searches for pairs of cells with same pair of possible values within a single block. Two possible values in these pairs of cells mast be missing in other cells of the block. If there are other possible values in these cells, they will be removed from the candidate list.
 
